@@ -1,0 +1,7 @@
+/.mitmproxy
+/.vscode
+/_materials
+/__pycache__
+/rules
+
+*.ini

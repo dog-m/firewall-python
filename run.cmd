@@ -1,0 +1,1 @@
+@mitmdump --mode regular --listen-host 0.0.0.0 --listen-port 15000 --ssl-insecure --set stream_large_bodies=1 --set connection_strategy=lazy --set flow_detail=1 --scripts firewall.py --ignore-hosts "android.google.com"

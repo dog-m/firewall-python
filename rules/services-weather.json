@@ -1,0 +1,12 @@
+{
+    "id": "services-weather",
+    "description": "сервисы / погода",
+    "sites": {
+        "service.weather.microsoft.com": {
+            "allow": "*"
+        },
+        "tile-service.weather.microsoft.com": {
+            "allow": "*"
+        }
+    }
+}

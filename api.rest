@@ -1,0 +1,24 @@
+@host = http://127.0.0.1:15000
+
+### something
+GET {{host}}/api/rules/list
+
+### something
+PUT {{host}}/api/rules/set/enabled
+?rule=all
+&rule=school
+
+### something
+GET {{host}}/api/rules/check
+?host=vk.com
+&path=/im/sel?id=123456789
+
+### something
+GET {{host}}/api/log/recent
+
+### something
+PUT {{host}}/api/log/set/blocked?record=true
+
+### something
+PUT {{host}}/api/log/set/blocked?record=0
+
