@@ -1,6 +1,6 @@
 {
     "id": "services-weather",
-    "description": "сервисы / погода",
+    "description": "Services / MS Weather",
     "sites": {
         "service.weather.microsoft.com": {
             "allow": "*"

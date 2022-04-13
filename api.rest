@@ -1,24 +1,24 @@
 @host = http://127.0.0.1:15000
 
-### something
+### Returns lists of LOADED and ENABLED rules
 GET {{host}}/api/rules/list
 
-### something
+### Enables ONLY specified set of rules (others will be disabled)
 PUT {{host}}/api/rules/set/enabled
 ?rule=all
 &rule=school
 
-### something
+### Performs a check for a specified HOST and PATH over a set of currently ENABLED rules
 GET {{host}}/api/rules/check
 ?host=vk.com
 &path=/im/sel?id=123456789
 
-### something
+### Returns last activity
 GET {{host}}/api/log/recent
 
-### something
+### Enables logging of BLOCKED requests
 PUT {{host}}/api/log/set/blocked?record=true
 
-### something
+### Disables logging of BLOCKED requests
 PUT {{host}}/api/log/set/blocked?record=0
 

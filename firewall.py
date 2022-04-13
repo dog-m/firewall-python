@@ -325,10 +325,14 @@ def create_an_app(firewall: Firewall):
 
     @app.errorhandler(404)
     def nothing():
-        return "Nothing", 404
+        """Default routing error handler"""
+
+        return "", 404
 
     @app.get("/api/rules/list")
     def api_get_list_of_rules():
+        """Returns lists of LOADED and ENABLED rules"""
+
         all = list(firewall.filter.loaded_descriptions.keys())
         all.sort()
         enabled = list(firewall.filter.active_rules)
@@ -336,6 +340,8 @@ def create_an_app(firewall: Firewall):
 
     @app.put("/api/rules/set/enabled")
     def api_set_rule_enabled_or_not():
+        """Enables ONLY specified set of rules (others will be disabled)"""
+
         # deactivate everything first
         firewall.filter.disable_all_rules()
         # leave only specified ones
@@ -345,6 +351,8 @@ def create_an_app(firewall: Firewall):
 
     @app.get("/api/rules/check")
     def api_check_if_url_is_accessible():
+        """Performs a check for a specified HOST and PATH over a set of currently ENABLED rules"""
+
         host = request.args["host"]
         path = request.args["path"]
 
@@ -380,17 +388,22 @@ def create_an_app(firewall: Firewall):
 
     @app.get("/api/log/recent")
     def api_recent_records_from_log():
+        """Returns last activity"""
+        
         return {"records": firewall.logger.records}
 
     @app.put("/api/log/set/blocked")
     def api_toggle_logging_of_blocked_requests():
+        """Enables or Disables logging of BLOCKED requests"""
+
         record = request.args.get("record", "False").lower()
         firewall.log_blocked_requests = record == "true" or record == "1"
         return {"log_blocked_requests": firewall.log_blocked_requests}
 
     @app.route("/")
-    def qqq():
-        return render_template("main.html")
+    def main_page():
+        """Main page / TODO"""
+        return render_template("index.html")
 
     return app
 

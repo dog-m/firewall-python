@@ -1,5 +1,6 @@
 {
     "id": "all",
+    "description": "Wild Internet",
     "sites": {
         "*": {
             "allow": [
