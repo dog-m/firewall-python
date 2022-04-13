@@ -1,6 +1,7 @@
 from datetime import datetime
 from genericpath import exists, isfile
 from http.client import FORBIDDEN
+import io
 import sys
 from flask import Flask, json, render_template, request
 from mitmproxy import ctx, http
@@ -84,7 +85,7 @@ class RuleDescription:
     sites: Dict[str, HostRecord]
 
     def __init__(self, filename: str):
-        with open(filename, "rt") as file:
+        with io.open(filename, "rt", encoding="utf-8") as file:
             obj = js.load(file)
             self.id = obj["id"]
             self.sites = dict()
@@ -244,7 +245,7 @@ class RuleManager:
 
 def load_text(filename: str) -> str:
     try:
-        with open(filename, "rt") as file:
+        with io.open(filename, "rt", encoding="utf-8") as file:
             return "".join(file.readlines())
     except:
         ctx.log.error("#######################")
@@ -272,7 +273,7 @@ class Firewall:
                 self.filter.load_rule(name[:-5])
 
         # enable ones from the "config"
-        with open("./config.json") as file:
+        with io.open("./config.json", "rt", encoding="utf-8") as file:
             config = js.load(file)
             for rule_id in config["startup-rules"]:
                 self.filter.enable_rule(rule_id)
