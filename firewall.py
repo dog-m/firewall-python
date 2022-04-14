@@ -322,7 +322,7 @@ class Firewall:
             url_part = url[:p]
             params = url[p:]
             compressor = zlib.compressobj(level=9, method=zlib.DEFLATED, wbits=-15, memLevel=9)
-            data = compressor.compress(params)
+            data = compressor.compress(params.encode())
             data += compressor.flush()
             params_compressed = base64.a85encode(data)
             return f"{url_part}?`{params_compressed}"
