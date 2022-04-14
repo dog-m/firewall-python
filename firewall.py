@@ -289,6 +289,7 @@ class Firewall:
                 self._track_allowed(flow.request)
             else:
                 self._block_request(flow)
+                self._track_blocked(flow.request)
 
     def response(self, flow: http.HTTPFlow):
         pass
@@ -296,20 +297,29 @@ class Firewall:
     def _is_allowed(self, request: http.Request) -> bool:
         return self.filter.check(request.host, request.path)
 
-    def _track_allowed(self, request: http.Request) -> None:
-        self.logger.add(f"[{request.method}] {request.url}")
-
     def _block_request(self, flow: http.HTTPFlow) -> None:
-        # perform the action first
         flow.reply.take()
         flow.response = http.Response.make(
             FORBIDDEN, self.block_message, self.block_message_headers
         )
         flow.reply.commit()
 
-        # then log it
+    def _track_allowed(self, request: http.Request) -> None:
+        url = self.get_compact_url(request.url)
+        # method = request.method
+        self.logger.add(f"[+] {url}")
+
+    def _track_blocked(self, request: http.Request) -> None:
         if self.log_blocked_requests:
-            self.logger.add(f"[x] {flow.request.url}")
+            url = self.get_compact_url(request.url)
+            self.logger.add(f"[#] {url}")
+
+    def get_compact_url(self, url: str) -> str:
+        params = url.find("?")
+        if params != -1:
+            return url[:params] + "?..."
+        else:
+            return url
 
     def reaupply_rules(self):
         pass
@@ -390,7 +400,7 @@ def create_an_app(firewall: Firewall):
     @app.get("/api/log/recent")
     def api_recent_records_from_log():
         """Returns last activity"""
-        
+
         return {"records": firewall.logger.records}
 
     @app.put("/api/log/set/blocked")
