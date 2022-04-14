@@ -22,3 +22,8 @@ PUT {{host}}/api/log/set/blocked?record=true
 ### Disables logging of BLOCKED requests
 PUT {{host}}/api/log/set/blocked?record=0
 
+### SAVES and then CLEARS the firewall log contents
+PUT {{host}}/api/log/save-and-clear
+
+### Cleans-up the contents of the firewall's log
+PUT {{host}}/api/log/clear

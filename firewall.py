@@ -1,14 +1,13 @@
 import base64
 from datetime import datetime
-from genericpath import exists, isfile
+from distutils.dir_util import mkpath
 from http.client import FORBIDDEN
 import io
 import sys
 import zlib
-from flask import Flask, json, render_template, request
+from flask import Flask, render_template, request
 from mitmproxy import ctx, http
 from mitmproxy.addons import asgiapp
-from mitmproxy.controller import DummyReply
 
 import re
 import json as js
@@ -35,15 +34,20 @@ class ActivityLogger:
         self.records.append(f"{timestamp} | {msg}")
 
     def save(self):
+        # make shure the target directory exists
+        mkpath("./logs")
+
+        # create a name for a new file
         timestamp = datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
         filename = f"./logs/{timestamp}.log"
+
+        # perform actual file creation and writing
         try:
-            with open(filename, "wt") as file:
+            with io.open(filename, "wt", encoding="utf-8") as file:
                 file.writelines(self.records)
             self.clear()
         except:
-            ctx.log.error("#######################")
-            return ""
+            ctx.log.error("Unable to save log contents")
 
 
 # ==============================================================================
@@ -250,7 +254,7 @@ def load_text(filename: str) -> str:
         with io.open(filename, "rt", encoding="utf-8") as file:
             return "".join(file.readlines())
     except:
-        ctx.log.error("#######################")
+        ctx.log.error(f"Unable to load {filename}")
         return ""
 
 
@@ -260,11 +264,13 @@ class Firewall:
     logger: ActivityLogger
     filter: RuleManager
     log_blocked_requests: bool = False
+    active_flows: Set[http.HTTPFlow]
 
     def __init__(self) -> None:
         self.logger = ActivityLogger()
         self.filter = RuleManager()
         self.load_rules()
+        self.active_flows = set()
         # prepare blocked url message text
         self.block_message = str.encode(load_text("./PAGE_FORBIDDEN.txt"))
 
@@ -289,12 +295,13 @@ class Firewall:
         if flow.reply.state == "start":
             if self._is_allowed(flow.request):
                 self._track_allowed(flow.request)
+                self.active_flows.add(flow)
             else:
                 self._block_request(flow)
                 self._track_blocked(flow.request)
 
     def response(self, flow: http.HTTPFlow):
-        pass
+        self.active_flows.discard(flow)
 
     def _is_allowed(self, request: http.Request) -> bool:
         return self.filter.check(request.host, request.path)
@@ -317,20 +324,41 @@ class Firewall:
             self.logger.add(f"[#] {url}")
 
     def get_compact_url(self, url: str) -> str:
-        p = url.find("?")
-        if p != -1:
-            url_part = url[:p]
-            params = url[p:]
-            compressor = zlib.compressobj(level=9, method=zlib.DEFLATED, wbits=-15, memLevel=9)
+        q_separator = url.find("?")
+        if q_separator != -1:
+            # separate parameters from the rest of the path/document
+            url_part = url[:q_separator]
+            params = url[q_separator + 1 :]
+
+            # reduce the size of the parameter string
+            compressor = zlib.compressobj(
+                level=zlib.Z_BEST_COMPRESSION,
+                method=zlib.DEFLATED,
+                wbits=-15,
+                memLevel=9,
+            )
             data = compressor.compress(params.encode())
             data += compressor.flush()
-            params_compressed = base64.a85encode(data)
-            return f"{url_part}?`{params_compressed}"
+            params_compacted = base64.b85encode(data)
+
+            # render compact form
+            return f"{url_part}? {params_compacted}"
         else:
+            # nothing to compact
             return url
 
     def reaupply_rules(self):
-        pass
+        bad_flows = []
+
+        # collect connections that should be closed
+        for flow in self.active_flows:
+            if not self._is_allowed(flow.request):
+                bad_flows.append(flow)
+
+        # close the connections
+        for flow in bad_flows:
+            self.active_flows.discard(flow)
+            flow.kill()
 
 
 # ==============================================================================
@@ -363,8 +391,13 @@ def create_an_app(firewall: Firewall):
 
         # deactivate everything first
         firewall.filter.disable_all_rules()
+
         # leave only specified ones
         firewall.filter.enable_rule_all(request.args.getlist("rule"))
+
+        # re-apply newely enabled rules
+        firewall.reaupply_rules()
+
         # report with a set of active rules
         return {"enabled": list(firewall.filter.active_rules)}
 
@@ -418,6 +451,20 @@ def create_an_app(firewall: Firewall):
         record = request.args.get("record", "False").lower()
         firewall.log_blocked_requests = record == "true" or record == "1"
         return {"log_blocked_requests": firewall.log_blocked_requests}
+
+    @app.put("/api/log/save-and-clear")
+    def api_save_log():
+        """SAVES and then CLEARS the firewall log contents"""
+
+        firewall.logger.save()
+        return {"saved": True}
+
+    @app.put("/api/log/clear")
+    def api_clear_log_contents():
+        """Cleans-up the contents of the firewall's log"""
+
+        firewall.logger.clear()
+        return {"cleaned": True}
 
     @app.route("/")
     def main_page():
