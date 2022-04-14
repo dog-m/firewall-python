@@ -1,8 +1,10 @@
+import base64
 from datetime import datetime
 from genericpath import exists, isfile
 from http.client import FORBIDDEN
 import io
 import sys
+import zlib
 from flask import Flask, json, render_template, request
 from mitmproxy import ctx, http
 from mitmproxy.addons import asgiapp
@@ -315,9 +317,15 @@ class Firewall:
             self.logger.add(f"[#] {url}")
 
     def get_compact_url(self, url: str) -> str:
-        params = url.find("?")
-        if params != -1:
-            return url[:params] + "?..."
+        p = url.find("?")
+        if p != -1:
+            url_part = url[:p]
+            params = url[p:]
+            compressor = zlib.compressobj(level=9, method=zlib.DEFLATED, wbits=-15, memLevel=9)
+            data = compressor.compress(params)
+            data += compressor.flush()
+            params_compressed = base64.a85encode(data)
+            return f"{url_part}?`{params_compressed}"
         else:
             return url
 
