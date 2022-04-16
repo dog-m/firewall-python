@@ -3,6 +3,7 @@
 /_materials
 /__pycache__
 /rules
+/logs
 
 *.ini
 config.json

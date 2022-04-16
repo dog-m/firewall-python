@@ -1,7 +1,7 @@
 import base64
 from datetime import datetime
 from distutils.dir_util import mkpath
-from http.client import FORBIDDEN
+import http.client as http_client
 import io
 import sys
 import zlib
@@ -20,6 +20,9 @@ import os
 # ==============================================================================
 
 
+DIR_LOGS = "./logs"
+
+
 class ActivityLogger:
     records: List[str]
 
@@ -35,17 +38,16 @@ class ActivityLogger:
 
     def save(self):
         # make shure the target directory exists
-        mkpath("./logs")
+        mkpath(DIR_LOGS)
 
         # create a name for a new file
         timestamp = datetime.now().strftime("%Y-%m-%d_%H.%M.%S")
-        filename = f"./logs/{timestamp}.log"
+        filename = f"{DIR_LOGS}/{timestamp}.log"
 
         # perform actual file creation and writing
         try:
             with io.open(filename, "wt", encoding="utf-8") as file:
-                file.writelines(self.records)
-            self.clear()
+                file.write("\n".join(self.records))
         except:
             ctx.log.error("Unable to save log contents")
 
@@ -88,12 +90,14 @@ class RuleDescription:
                 )
 
     id: str
+    comment: str
     sites: Dict[str, HostRecord]
 
     def __init__(self, filename: str):
         with io.open(filename, "rt", encoding="utf-8") as file:
             obj = js.load(file)
             self.id = obj["id"]
+            self.comment = obj.get("description", "-")
             self.sites = dict()
             for host, record in obj["sites"].items():
                 host_pattern = str(host)
@@ -292,7 +296,7 @@ class Firewall:
 
     def request(self, flow: http.HTTPFlow):
         # operate only on pure requests that haven't been taken by other plugins
-        if flow.reply.state == "start":
+        if flow.reply.state == "start" and not flow.error:
             if self._is_allowed(flow.request):
                 self._track_allowed(flow.request)
                 self.active_flows.add(flow)
@@ -307,11 +311,13 @@ class Firewall:
         return self.filter.check(request.host, request.path)
 
     def _block_request(self, flow: http.HTTPFlow) -> None:
-        flow.reply.take()
+        flow.intercept()
         flow.response = http.Response.make(
-            FORBIDDEN, self.block_message, self.block_message_headers
+            status_code=http_client.FORBIDDEN,
+            content=self.block_message,
+            headers=self.block_message_headers,
         )
-        flow.reply.commit()
+        flow.resume()
 
     def _track_allowed(self, request: http.Request) -> None:
         url = self.get_compact_url(request.url)
@@ -330,7 +336,7 @@ class Firewall:
             url_part = url[:q_separator]
             params = url[q_separator + 1 :]
 
-            # reduce the size of the parameter string
+            # reduce the size of the parameter string via zlib/deflate in base85
             compressor = zlib.compressobj(
                 level=zlib.Z_BEST_COMPRESSION,
                 method=zlib.DEFLATED,
@@ -348,7 +354,7 @@ class Firewall:
             return url
 
     def reaupply_rules(self):
-        bad_flows = []
+        bad_flows: List[http.HTTPFlow] = []
 
         # collect connections that should be closed
         for flow in self.active_flows:
@@ -358,7 +364,8 @@ class Firewall:
         # close the connections
         for flow in bad_flows:
             self.active_flows.discard(flow)
-            flow.kill()
+            if flow.killable:
+                flow.kill()
 
 
 # ==============================================================================
@@ -366,8 +373,9 @@ class Firewall:
 # ==============================================================================
 
 
-def create_an_app(firewall: Firewall):
+def create_handler_app(firewall: Firewall):
     app = Flask("Micro-Firewall")
+    app.config["JSON_AS_ASCII"] = False  # enable UTF-8 strings in JSON results
     app.firewall = firewall
 
     @app.errorhandler(404)
@@ -382,8 +390,13 @@ def create_an_app(firewall: Firewall):
 
         all = list(firewall.filter.loaded_descriptions.keys())
         all.sort()
-        enabled = list(firewall.filter.active_rules)
-        return {"all": all, "enabled": enabled}
+        return {
+            "all": dict(
+                (rule.id, rule.comment)
+                for rule in firewall.filter.loaded_descriptions.values()
+            ),
+            "enabled": list(firewall.filter.active_rules),
+        }
 
     @app.put("/api/rules/set/enabled")
     def api_set_rule_enabled_or_not():
@@ -392,13 +405,13 @@ def create_an_app(firewall: Firewall):
         # deactivate everything first
         firewall.filter.disable_all_rules()
 
-        # leave only specified ones
+        # turn back on only specified ones
         firewall.filter.enable_rule_all(request.args.getlist("rule"))
 
-        # re-apply newely enabled rules
+        # re-apply newely enabled rules to active connections
         firewall.reaupply_rules()
 
-        # report with a set of active rules
+        # report with a set of activated rules
         return {"enabled": list(firewall.filter.active_rules)}
 
     @app.get("/api/rules/check")
@@ -418,16 +431,16 @@ def create_an_app(firewall: Firewall):
                     target[rule.id] = ls = []
                 ls.append(f"{rHost.host} => {rPath.path}")
 
-        for h in firewall.filter.hosts.values():
-            if h.host_pattern.fullmatch(host):
+        for entry in firewall.filter.hosts.values():
+            if entry.host_pattern.fullmatch(host):
                 # white
-                for p in h.allowed.values():
+                for p in entry.allowed.values():
                     if p.path_pattern.fullmatch(path):
-                        reg(h, p, allow)
+                        reg(entry, p, allow)
                 # black
-                for p in h.blocked.values():
+                for p in entry.blocked.values():
                     if p.path_pattern.fullmatch(path):
-                        reg(h, p, block)
+                        reg(entry, p, block)
 
         allowing = len(allow) > 0
         blocking = len(block) > 0
@@ -457,6 +470,7 @@ def create_an_app(firewall: Firewall):
         """SAVES and then CLEARS the firewall log contents"""
 
         firewall.logger.save()
+        firewall.logger.clear()
         return {"saved": True}
 
     @app.put("/api/log/clear")
@@ -474,7 +488,7 @@ def create_an_app(firewall: Firewall):
     return app
 
 
-class FirewallFrontend(asgiapp.WSGIApp):
+class FirewallFrontendWrapper(asgiapp.WSGIApp):
     EXPECTED_HOST = re.compile(r"(localhost|127\.0\.0\.1)")
 
     def __init__(self, wsgi_app):
@@ -490,9 +504,9 @@ class FirewallFrontend(asgiapp.WSGIApp):
         )
 
 
-def create_frontend(firewall: Firewall) -> FirewallFrontend:
-    app = create_an_app(firewall)
-    return FirewallFrontend(app)
+def create_frontend(firewall: Firewall) -> FirewallFrontendWrapper:
+    app = create_handler_app(firewall)
+    return FirewallFrontendWrapper(app)
 
 
 # ==============================================================================
